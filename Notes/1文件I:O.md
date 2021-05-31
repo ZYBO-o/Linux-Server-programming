@@ -1,5 +1,3 @@
-
-
 # 文件I/O
 
 UNX系统中的大多数文件只需用到5个函数:open、read、 write、 lseek以及close。
@@ -255,13 +253,13 @@ UNIX系统支持在不同进程间共享打开文件。在介绍dup函数之前,
    + 指向该文件v节点表项的指针
 3. 每个打开文件(或设备)都有一个v节点( v-node)结构。v节点包含了文件类型和对此文件进行各种操作函数的指针。对于大多数文件,v节点还包含了该文件的i节点(i-node,索引节点)。这些信息是在打开文件时从磁盘上读入内存的，所以，文件的所有相关信息都是随时可用的。
 
-<div align = center><img src="../../Accumulation/图片/UNIX24.png" width="600px" /></div>
+<div align = center><img src="../图片/IO1.png" width="600px" /></div>
 
 > 创建v节点结构的目的是对在一个计算机系统上的多文件系统类型提供支持。把与文件系统无关的i节点部分称为v节点。Linux没有将相关数据结构分为i节点和ⅴ节点,而是采用了一个与文件系统相关的i节点和个与文件系统无关的i节点。
 
 如果两个独立进程打开同一个文件，则有下图的关系：
 
-<div align = center><img src="../../Accumulation/图片/UNIX25.png" width="600px" /></div>
+<div align = center><img src="../图片/IO2.png" width="600px" /></div>
 
 文件描述符标志和文件状态标志在作用范围方面的区别，前者只用于一个进程的一个描述符，而后者则应用于指向该给定文件表项的任何进程中的所有描述符。
 
@@ -316,7 +314,7 @@ int dup2(int fd, int fd2);
 
 这些函数返回的新文件描述符与参数fd共享一个文件表项，如下图所示：
 
-<div align = center><img src="../../Accumulation/图片/UNIX26.png" width="600px" /></div>
+<div align = center><img src="../图片/IO3.png" width="600px" /></div>
 
 在此图中，假定进程启动时执行了：
 
@@ -366,7 +364,7 @@ fcnt1函数有以下5种功能
 4. 获取/设置异步IO所有权(cmd= F_GETOWN或F_SETOWN)。
 5. 获取/设置记录锁(cmd= F_GETLK、 F_SETLK或 F_SETLKW)
 
-<div align = center><img src="../../Accumulation/图片/UNIX27.png" width="600px" /></div>
+<div align = center><img src="../图片/IO4.png" width="600px" /></div>
 
 在修改文件描述符标志或文件状态标志时必须谨慎，先要获得现在的标志值，然后按照期望修改它，最后设置新标志值。不能只是执行 F_SETED或 E_SETEL命令,这样会关闭以前设置的标志位。
 
