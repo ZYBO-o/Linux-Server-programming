@@ -238,13 +238,187 @@ ssize_t write(int fd, const void *buf, size_t nbytes);
 
 BUFFSIZE 一般选取与磁盘块相同大小的字节数，大多数情况下4096
 
-大多数文件系统为改善性能都采用某种预读( read ahead)技术。当检测到正进行顺序读取时,系统就试图读入比应用所要求的更多数据,并假想应用很快就会读这些数据。
+大多数文件系统为改善性能都采用某种预读( read ahead)技术。当检测到正进行顺序读取时,系统就试图读入比应用所 要求的更多数据,并假想应用很快就会读这些数据。
 
 ## 九.文件共享
 
+UNIX系统支持在不同进程间共享打开文件。在介绍dup函数之前,先要说明这种共享。为此先介绍内核用于所有I/O的数据结构。
 
+内核使用3种数据结构表示打开文件,它们之间的关系决定了在文件共享方面一个进程对另个进程可能产生的影响。
 
+1. **每个进程在进程表中都有一个记录项,记录项中包含一张打开文件描述符表**，可将其视为一个矢量，每个描述符占用一项。与每个文件描述符相关联的是：
+   + 文件描述符标志。
+   + 指向一个文件表项的指针。
+2. **内核为所有打开文件维持一张文件表**。每个文件表项包含：
+   + 文件状态标志(读、写、添写、同步和非阻塞等)
+   + 当前文件偏移量
+   + 指向该文件v节点表项的指针
+3. 每个打开文件(或设备)都有一个v节点( v-node)结构。v节点包含了文件类型和对此文件进行各种操作函数的指针。对于大多数文件,v节点还包含了该文件的i节点(i-node,索引节点)。这些信息是在打开文件时从磁盘上读入内存的，所以，文件的所有相关信息都是随时可用的。
 
+<div align = center><img src="../../Accumulation/图片/UNIX24.png" width="600px" /></div>
 
+> 创建v节点结构的目的是对在一个计算机系统上的多文件系统类型提供支持。把与文件系统无关的i节点部分称为v节点。Linux没有将相关数据结构分为i节点和ⅴ节点,而是采用了一个与文件系统相关的i节点和个与文件系统无关的i节点。
 
+如果两个独立进程打开同一个文件，则有下图的关系：
 
+<div align = center><img src="../../Accumulation/图片/UNIX25.png" width="600px" /></div>
+
+文件描述符标志和文件状态标志在作用范围方面的区别，前者只用于一个进程的一个描述符，而后者则应用于指向该给定文件表项的任何进程中的所有描述符。
+
+---
+
+## 十.原子操作
+
+原子操作指的是由多步组成的一个操作。如果该操作原子地执行，则要么执行完所有步骤，要么一步也不执行，不能只执行所有步骤的一个子集。
+
+### 1.追加到一个文件
+
+多个进程同时使用这种方法将数据追加写到同一文件,则会产生问题
+
+问题出在逻辑操作“先定位到文件尾端,然后写”，它使用了两个分开的函数调用。解决问题的方法是使这两个操作对于其他进程而言成为一个原子操作。
+
+### 2.函数pread和pwrite
+
+```c
+#include <unistd.h> 
+
+ssize_t pread(int fd, void *buf, size_t nbytes, off_t offset); 
+//Returns: number of bytes read, 0 if end of ﬁle, −1 on error
+
+ssize_t pwrite(int fd, const void *buf, size_t nbytes, off_t offset); 
+//Returns: number of bytes written if OK, −1 on error
+```
+
+调用 pread相当于调用lseek后调用read，但是 pread又与这种顺序调用有下列重要区别：
+
++  调用 pread时,无法中断其定位和读操作。
++ 不更新当前文件偏移量。
+
+调用pwrite相当于调用lseek后调用 write,但也与它们有类似的区别。
+
+---
+
+## 十一.dup和dup2
+
+下面两个用来复制一个文件描述符
+
+```c
+#include <unistd.h>
+
+int dup(int fd);
+int dup2(int fd, int fd2);
+//Both return: new ﬁle descriptor if OK, −1 on error
+```
+
+由dup返回的新文件描述符一定是当前可用文件描述符中的最小数值。
+
+对于dup2，可以用fd2参数指定新描述符的值。如果fd2已经打开，则先将其关闭。如若fd等于fd2，则dup2返回fd2，而不关闭它。否则,fd2的 FD_CLOEXEO文件描述符标志就被清除，这样fd2在进程调用exec时是打开状态。
+
+这些函数返回的新文件描述符与参数fd共享一个文件表项，如下图所示：
+
+<div align = center><img src="../../Accumulation/图片/UNIX26.png" width="600px" /></div>
+
+在此图中，假定进程启动时执行了：
+
+```c
+newfd = dup(1);
+```
+
+当此函数开始执行时，假定一下个可用的描述符是3。因为两个描述符指向同一个文件表项，所以它们共享同一个文件状态标志(读，写，追加等)以及同一当前文件偏移量。
+
+## 十二.函数sync、 fsync和 fdatasync
+
+传统的UNⅨ系统实现在内核中设有缓冲区高速缓存或页高速缓存,大多数磁盘I/O都通过缓冲区进行。当我们向文件写入数据时，内核通常先将数据复制到缓冲区中，然后排入队列,晚些时候再写入磁盘。这种方式被称为**延迟写**( delayed write)
+
+通常，当内核需要重用缓冲区来存放其他磁盘块数据时,它会把所有延迟写数据块写入磁盘为了保证磁盘上实际文件系统与缓冲区中内容的一致性，UNIX系统提供了sync、 fsync和Edatasync三个函数。
+
+```c
+#include <unistd.h> 
+
+int fsync(int fd); 
+int fdatasync(int fd);
+//Returns: 0 if OK, −1 on error
+void sync(void);
+```
+
+sync只是将所有修改过的块缓冲区排入写队列，然后就返回，它并不等待实际写磁盘操作结束。
+
+fsync函数只对由文件描述符/指定的一个文件起作用，并且等待写磁盘操作结束才返回fsync可用于数据库这样的应用程序，这种应用程序需要确保修改过的块立即写到磁盘上。
+
+fdatasync函数类似于 sync，但它只影响文件的数据部分。而除数据外，fsync还会同步更新文件的属性。
+
+## 十三.函数fcntl 
+
+fcntl函数可以改变已经打开文件的属性。
+
+```c
+#include <fcntl.h> 
+
+int fcntl(int fd, int cmd, ... /* int arg */ ); 
+//Returns: depends on cmd if OK (see following), −1 on error
+```
+
+fcnt1函数有以下5种功能
+
+1. 复制一个已有的描述符(cmd= F_DUPFD或 F_DUPFD_CLOEXEC)。
+2. 获取/设置文件描述符标志(cmd= E_GETED或 F_SETED)。
+3. 获取/设置文件状态标志(cmd= F_GETEL或 F_SETEL)
+4. 获取/设置异步IO所有权(cmd= F_GETOWN或F_SETOWN)。
+5. 获取/设置记录锁(cmd= F_GETLK、 F_SETLK或 F_SETLKW)
+
+<div align = center><img src="../../Accumulation/图片/UNIX27.png" width="600px" /></div>
+
+在修改文件描述符标志或文件状态标志时必须谨慎，先要获得现在的标志值，然后按照期望修改它，最后设置新标志值。不能只是执行 F_SETED或 E_SETEL命令,这样会关闭以前设置的标志位。
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <string.h>
+int main(void)
+{
+    int fd;
+    int flag;
+    // 测试字符串
+    char *p = "我们是一个有中国特色的社会主义国家！！！！！！";
+    char *q = "呵呵, 社会主义好哇。。。。。。";
+    // 只写的方式打开文件
+    fd = open("test.txt", O_WRONLY);
+    if(fd == -1)
+    {
+        perror("open");
+        exit(1);
+    }
+    // 输入新的内容，该部分会覆盖原来旧的内容
+    if(write(fd, p, strlen(p)) == -1)
+    {
+        perror("write");
+        exit(1);
+    }
+    // 使用 F_GETFL 命令得到文件状态标志
+    flag = fcntl(fd, F_GETFL, 0);
+    if(flag == -1)
+    {
+        perror("fcntl");
+        exit(1);
+    }
+    // 将文件状态标志添加 ”追加写“ 选项
+    flag |= O_APPEND;
+    // 将文件状态修改为追加写
+    if(fcntl(fd, F_SETFL, flag) == -1)
+    {
+        perror("fcntl -- append write");
+        exit(1);
+    }
+    // 再次输入新内容，该内容会追加到旧内容的后面
+    if(write(fd, q, strlen(q)) == -1)
+    {
+        perror("write again");
+        exit(1);
+    }
+    // 关闭文件
+    close(fd);
+    return 0;
+}
+```
