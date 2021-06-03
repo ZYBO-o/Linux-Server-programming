@@ -83,7 +83,6 @@ Linux环境下，进程地址空间相互独立，每个进程各自有不同的
     #include<stdlib.h>
     
     int main() {
-    
         int fd[2];
         int ret;
         char writebuf[] = "hello linux";
@@ -95,13 +94,15 @@ Linux环境下，进程地址空间相互独立，每个进程各自有不同的
             exit(1);
         }
         printf("create pipe sucess fd[0]=%d, fd[1]=%d\n",fd[0],fd[1]);
-    		//write into pipe
+    		
+      	//write into pipe
         write(fd[1],writebuf,sizeof(writebuf));
     
         //read from pipe
         read(fd[0], readbuf, 128);
         printf("readbuf = %s\n", readbuf);
     
+      	//第二次读，管道中无数据，所以会阻塞
         read(fd[0], readbuf, 128);
         printf("second readbuf");
     
@@ -128,52 +129,52 @@ Linux环境下，进程地址空间相互独立，每个进程各自有不同的
 + **读写管道实现父子进程间的先后运行：**
 
   ```c
-  #include"stdio.h"
-  #include"sys/types.h"
-  #include"stdlib.h"
-  #include"unctrl.h"
-  #include"unctrl.h"
+  #include<stdlib.h>
+  #include<stdio.h>
+  #include<unistd.h>
+  
   int main() {
-      int fd[2];
-      //进程间的锁
+      //设置父子进程之间的同步锁
       char process_inter = 0;
-      //创建管程
-      int ret = pipe(fd);
-      if(ret < 0){
+      //创建管道
+      int fd[2];
+      if(pipe(fd) < 0) {
           perror("pipe error");
           exit(1);
+      } else {
+          printf("create pipe successfully!\n");
       }
-      printf("create pip successfully\n");
       //创建子进程
       pid_t pid = fork();
-      //子进程运行
-      if (pid == 0)
-      {
+      //如果是子进程
+      if(pid == 0) {
+          //读取同步锁
           read(fd[0], &process_inter, 1);
-          //等待父进程修改管程信息为1
+          //如果process_inter一直为0，则循环等待
           while(process_inter == 0);
+          //等到process_inter改变时，进行子进程操作
           for (int i = 0; i < 5; i++)
           {
               printf("this is child process, id = %d\n", i);
               sleep(1);
           }
-      }
-      //父进程运行
-      else if(pid > 0) 
-      {
+      } else if(pid > 0) {//父进程
+          //父进程操作
           for (int i = 0; i < 5; i++)
           {
               printf("this is parent process, id = %d\n", i);
               sleep(1);
           }
-          process_inter = 1;
           //修改process_inter
+          process_inter = 1;
           write(fd[1], &process_inter, 1);
       }
-      while (1);
+      while(1);
       return 0;
   }
   ```
+
+  <div align = center><img src="../图片/UNIX12.png" width="600px" /></div>
 
 ### 4.管道的优劣
 
@@ -240,10 +241,12 @@ Linux环境下，进程地址空间相互独立，每个进程各自有不同的
   }
   ```
 
-+ 利用有名管道进行无血缘关系进程之间的通信：
+<div align = center><img src="../图片/UNIX13.png" width="600px" /></div>
+
++ 利用创建的有名管道myfifo 进行无血缘关系进程之间的通信：
 
   ```c
-  //first.c
+  //first_process.c
   #include"stdlib.h"
   #include"sys/types.h"
   #include"stdio.h"
@@ -253,12 +256,10 @@ Linux环境下，进程地址空间相互独立，每个进程各自有不同的
       char process_inter = 0;
   
       int fd = open("./myfifo",O_WRONLY);
-  
       if(fd < 0) {
           perror("mkfifo error");
           exit(1);
       }
-  
       printf("open myfifo successfully\n");
   
       for (int i = 0; i < 5; i++)
@@ -272,8 +273,10 @@ Linux环境下，进程地址空间相互独立，每个进程各自有不同的
       while (1);  
       return 0;
   }
-  //=======================================================
-  //second.c
+  ```
+
+  ``` c
+  //second_process.c
   #include"stdlib.h"
   #include"sys/types.h"
   #include"stdio.h"
@@ -284,7 +287,6 @@ Linux环境下，进程地址空间相互独立，每个进程各自有不同的
       char process_inter = 0;
   
       int fd = open("./myfifo",O_RDONLY);
-  
       if(fd < 0) {
           perror("mkfifo error");
           exit(1);
@@ -292,7 +294,9 @@ Linux环境下，进程地址空间相互独立，每个进程各自有不同的
       printf("open myfifo successfully\n");
   
      read(fd, &process_inter, 1);
-     while (process_inter == 0);
+     while (process_inter == 0) {
+       printf("Now process_inter =0\n");
+     }
   
       for (int i = 0; i < 5; i++)
       {
@@ -304,4 +308,12 @@ Linux环境下，进程地址空间相互独立，每个进程各自有不同的
       return 0;
   }
   ```
+
+  运行结果：
+
+  <div align = center><img src="../图片/UNIX14.png" width="600px" /></div>
+
+  <div align = center><img src="../图片/UNIX15.png" width="600px" /></div>
+
+
 
