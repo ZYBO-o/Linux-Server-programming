@@ -9,7 +9,7 @@
 + [~~进程间通信—管道和FIFO~~](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/5%E8%BF%9B%E7%A8%8B%E9%97%B4%E9%80%9A%E4%BF%A1%E2%80%94%E7%AE%A1%E9%81%93%E5%92%8CFIFO.md)
 + [进程间通信—消息队列](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/6%20%E8%BF%9B%E7%A8%8B%E9%97%B4%E9%80%9A%E4%BF%A1%E2%80%94%E6%B6%88%E6%81%AF%E9%98%9F%E5%88%97.md)
 + [~~进程间通信—共享内存~~](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/7%20%E8%BF%9B%E7%A8%8B%E9%97%B4%E9%80%9A%E4%BF%A1%E2%80%94%E5%85%B1%E4%BA%AB%E5%86%85%E5%AD%98.md)
-+ [进程间通信—信号量](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/8%20%E8%BF%9B%E7%A8%8B%E9%97%B4%E9%80%9A%E4%BF%A1%E2%80%94%E4%BF%A1%E5%8F%B7%E9%87%8F.md)
++ [~~进程间通信—信号量~~](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/8%20%E8%BF%9B%E7%A8%8B%E9%97%B4%E9%80%9A%E4%BF%A1%E2%80%94%E4%BF%A1%E5%8F%B7%E9%87%8F.md)
 
 + [信号](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/9%20%E4%BF%A1%E5%8F%B7.md)
 
