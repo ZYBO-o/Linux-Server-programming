@@ -13,7 +13,7 @@
 
 + [~~信号~~](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/9%20%E4%BF%A1%E5%8F%B7.md)
 
-+ [守护进程](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/10%20%E5%AE%88%E6%8A%A4%E8%BF%9B%E7%A8%8B.md)
++ [~~守护进程~~](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/10%20%E5%AE%88%E6%8A%A4%E8%BF%9B%E7%A8%8B.md)
 
 + [~~线程的创建与使用~~](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/11%E7%BA%BF%E7%A8%8B%E7%9A%84%E5%88%9B%E5%BB%BA%E4%B8%8E%E4%BD%BF%E7%94%A8.md)
 
