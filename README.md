@@ -7,7 +7,7 @@
 + [~~进程创建与使用~~](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/3%E8%BF%9B%E7%A8%8B%E5%88%9B%E5%BB%BA%E4%B8%8E%E4%BD%BF%E7%94%A8.md)
 + [~~进程间关系~~](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/4%E8%BF%9B%E7%A8%8B%E9%97%B4%E5%85%B3%E7%B3%BB.md)
 + [~~进程间通信—管道和FIFO~~](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/5%E8%BF%9B%E7%A8%8B%E9%97%B4%E9%80%9A%E4%BF%A1%E2%80%94%E7%AE%A1%E9%81%93%E5%92%8CFIFO.md)
-+ [进程间通信—消息队列](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/6%20%E8%BF%9B%E7%A8%8B%E9%97%B4%E9%80%9A%E4%BF%A1%E2%80%94%E6%B6%88%E6%81%AF%E9%98%9F%E5%88%97.md)
++ [~~进程间通信—消息队列~~](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/6%20%E8%BF%9B%E7%A8%8B%E9%97%B4%E9%80%9A%E4%BF%A1%E2%80%94%E6%B6%88%E6%81%AF%E9%98%9F%E5%88%97.md)
 + [~~进程间通信—共享内存~~](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/7%20%E8%BF%9B%E7%A8%8B%E9%97%B4%E9%80%9A%E4%BF%A1%E2%80%94%E5%85%B1%E4%BA%AB%E5%86%85%E5%AD%98.md)
 + [~~进程间通信—信号量~~](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/8%20%E8%BF%9B%E7%A8%8B%E9%97%B4%E9%80%9A%E4%BF%A1%E2%80%94%E4%BF%A1%E5%8F%B7%E9%87%8F.md)
 
@@ -17,7 +17,7 @@
 
 + [~~线程的创建与使用~~](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/11%E7%BA%BF%E7%A8%8B%E7%9A%84%E5%88%9B%E5%BB%BA%E4%B8%8E%E4%BD%BF%E7%94%A8.md)
 
-+ [线程同步](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/12%E7%BA%BF%E7%A8%8B%E5%90%8C%E6%AD%A5.md)
++ [~~线程同步~~](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/12%E7%BA%BF%E7%A8%8B%E5%90%8C%E6%AD%A5.md)
 
 + [~~基于TCP套接字编程~~](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/13%E5%9F%BA%E4%BA%8ETCP%E5%A5%97%E6%8E%A5%E5%AD%97%E7%BC%96%E7%A8%8B.md)
 
