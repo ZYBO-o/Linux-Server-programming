@@ -23,7 +23,7 @@
 
 + [基于UCP套接字编程与本地套接字编程](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/14%E5%9F%BA%E4%BA%8EUDP%E5%A5%97%E6%8E%A5%E5%AD%97%E5%92%8C%E6%9C%AC%E5%9C%B0%E5%A5%97%E6%8E%A5%E5%AD%97%E7%BC%96%E7%A8%8B.md)
 
-+ [多线程与多进程并发服务器实现](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/15%E5%A4%9A%E8%BF%9B%E7%A8%8B%E5%92%8C%E5%A4%9A%E7%BA%BF%E7%A8%8B%E5%B9%B6%E5%8F%91%E6%9C%8D%E5%8A%A1%E5%99%A8%E5%AE%9E%E7%8E%B0.md)
++ [~~多线程与多进程并发服务器实现~~](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/15%E5%A4%9A%E8%BF%9B%E7%A8%8B%E5%92%8C%E5%A4%9A%E7%BA%BF%E7%A8%8B%E5%B9%B6%E5%8F%91%E6%9C%8D%E5%8A%A1%E5%99%A8%E5%AE%9E%E7%8E%B0.md)
 
 + [~~高级I/O~~](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/16%E9%AB%98%E7%BA%A7IO.md)
 
