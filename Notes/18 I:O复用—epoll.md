@@ -1,19 +1,33 @@
-## 一.epoll基本使用
+## 一.epoll基本概要
 
-### 1.基本介绍
+### 1.背景介绍
 
-epoll是Linux下多路复用IO接口select/poll的增强版本，它能显著提高程序在大量并发连接中只有少量活跃的情况下的系统CPU利用率。
+设想一个场景：
 
-+ 因为它会复用文件描述符集合来传递结果而不用迫使开发者每次等待事件之前都必须重新准备要被侦听的文件描述符集合，
-+ 另一点原因就是获取事件的时候，它无须遍历整个被侦听的描述符集，只要遍历那些被内核IO事件异步唤醒而加入Ready队列的描述符集合就行了。
++ 有100万用户同时与一个进程保持着TCP连接，而 **每一时刻只有几十个或几百个TCP连接是活跃的(接收TCP包)** ，也就是说在每一时刻进程只需要处理这100万连接中的一小部分连接。
++ 那么，如何才能高效的处理这种场景呢？进程是否在每次询问操作系统收集有事件发生的TCP连接时，把这100万个连接告诉操作系统，然后由操作系统找出其中有事件发生的几百个连接呢？实际上，在Linux2.4版本以前，那时的select或者poll事件驱动方式是这样做的。
++ 这里有个非常明显的问题，即在某一时刻，进程收集有事件的连接时，其实这100万连接中的大部分都是没有事件发生的。因此如果每次收集事件时，都把100万连接的套接字传给操作系统(这首先是用户态内存到内核态内存的大量复制)，而由操作系统内核寻找这些连接上有没有未处理的事件，将会是巨大的资源浪费，
++  **然而select和poll就是这样做的，因此它们最多只能处理几千个并发连接。** 
 
-目前epell是linux大规模并发网络程序中的热门首选模型。
+**而epoll不这样做，它在Linux内核中申请了一个简易的文件系统，把原先的一个select或poll调用分成了3部分：**
 
-epoll除了提供select/poll那种IO事件的电平触发（Level Triggered）外，还提供了边沿触发（Edge Triggered），这就使得用户空间程序有可能缓存IO状态，减少epoll_wait/epoll_pwait的调用，提高应用程序效率。
+```c
+int epoll_create(int size);  
+int epoll_ctl(int epfd, int op, int fd, struct epoll_event *event);  
+int epoll_wait(int epfd, struct epoll_event *events,int maxevents, int timeout);
+```
+
+1. 调用epoll_create建立一个epoll对象(在epoll文件系统中给这个句柄分配资源)；
+
+2. 调用epoll_ctl向epoll对象中添加这100万个连接的套接字；
+
+3. 调用epoll_wait收集发生事件的连接。
+
+这样只需要在进程启动时建立1个epoll对象，并在需要的时候向它添加或删除连接就可以了，因此，在实际收集事件时， **epoll_wait的效率就会非常高，因为调用epoll_wait时并没有向它传递这100万个连接，内核也不需要去遍历全部的连接。**
 
 
 
-### 2.基础API
+### 2. epoll API 详解
 
 #### epoll_create 函数
 
@@ -115,174 +129,66 @@ int epoll_pwait(int epfd, struct epoll_event *events,
 
 
 
-### 3.epoll实现基本socket通信
+### 3.epoll原理详解
 
-服务器端：
-
-```c
-#include "wrap.h"
-
-#define MAXLINE 8192
-#define SERV_PORT 8000
-#define OPEN_MAX 5000
-
-int main(int argc, char *argv[])
-{
-    int i, listenfd, connfd, sockfd;
-    int  n, num = 0;
-    ssize_t nready, efd, res;
-    char buf[MAXLINE], str[INET_ADDRSTRLEN];
-    socklen_t clilen;
-
-    struct sockaddr_in cliaddr, servaddr;
-    //tep: epoll_ctl参数  ep[] : epoll_wait参数
-    struct epoll_event tep, ep[OPEN_MAX];       
-   
-    //创建socket
-    listenfd = Socket(AF_INET, SOCK_STREAM, 0);
-
-    //端口复用
-    int opt = 1;
-    setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));      //端口复用
-
-    //绑定Socket
-    bzero(&servaddr, sizeof(servaddr));
-    servaddr.sin_family = AF_INET;
-    servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-    servaddr.sin_port = htons(SERV_PORT);
-    Bind(listenfd, (struct sockaddr *) &servaddr, sizeof(servaddr));
-
-    //设置监听数目
-    Listen(listenfd, 20);
-
-     //创建epoll模型, efd指向红黑树根节点
-    efd = epoll_create(OPEN_MAX);              
-    if (efd == -1)
-        perr_exit("epoll_create error");
-
-    //指定lfd的监听时间为"读"
-    tep.events = EPOLLIN; 
-    //将listened文件描述符设置为数据
-    tep.data.fd = listenfd; 
-    //将lfd及对应的结构体设置到树上,efd可找到该树          
-    res = epoll_ctl(efd, EPOLL_CTL_ADD, listenfd, &tep);    
-    if (res == -1)
-        perr_exit("epoll_ctl error");
-
-    for ( ; ; ) {
-        /*epoll为server阻塞监听事件, ep为struct epoll_event类型数组, OPEN_MAX为数组容量, -1表永久阻塞*/
-        nready = epoll_wait(efd, ep, OPEN_MAX, -1); 
-        if (nready == -1)
-            perr_exit("epoll_wait error");
-
-        for (i = 0; i < nready; i++) {
-            //如果不是"读"事件, 继续循环
-            if (!(ep[i].events & EPOLLIN))      
-                continue;
-
-            //判断满足事件的fd是不是lfd      
-            if (ep[i].data.fd == listenfd) {          
-                clilen = sizeof(cliaddr);
-                //接受链接
-                connfd = Accept(listenfd, (struct sockaddr *)&cliaddr, &clilen);    
-
-                printf("received from %s at PORT %d\n", 
-                        inet_ntop(AF_INET, &cliaddr.sin_addr, str, sizeof(str)), 
-                        ntohs(cliaddr.sin_port));
-                printf("cfd %d---client %d\n", connfd, ++num);
-
-                //添加至红黑树进行监听
-                tep.events = EPOLLIN; tep.data.fd = connfd;
-                res = epoll_ctl(efd, EPOLL_CTL_ADD, connfd, &tep);
-                if (res == -1)
-                    perr_exit("epoll_ctl error");
-
-            //不是lfd, 
-            } else {                                
-                sockfd = ep[i].data.fd;
-                n = Read(sockfd, buf, MAXLINE);
-
-                if (n == 0) {                       //读到0,说明客户端关闭链接
-                    //将该文件描述符从红黑树摘除
-                    res = epoll_ctl(efd, EPOLL_CTL_DEL, sockfd, NULL);  
-                    if (res == -1)
-                        perr_exit("epoll_ctl error");
-                    //关闭与该客户端的链接
-                    Close(sockfd);                  
-                    printf("client[%d] closed connection\n", sockfd);
-
-                } else if (n < 0) {                 //出错
-                    perror("read n < 0 error: ");
-                    res = epoll_ctl(efd, EPOLL_CTL_DEL, sockfd, NULL);
-                    Close(sockfd);
-
-                } else {                            //实际读到了字节数
-                    for (i = 0; i < n; i++)
-                        buf[i] = toupper(buf[i]);   //转大写,写回给客户端
-
-                    Write(STDOUT_FILENO, buf, n);
-                    Writen(sockfd, buf, n);
-                }
-            }
-        }
-    }
-    Close(listenfd);
-    Close(efd);
-
-    return 0;
-}
-```
-
-客户端：
+当某一进程调用epoll_create方法时，Linux内核会创建一个eventpoll结构体，这个结构体中有两个成员与epoll的使用方式密切相关，如下所示：
 
 ```c
-#include <stdio.h>
-#include <string.h>
-#include <unistd.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-
-#include "wrap.h"
-
-#define MAXLINE 8192
-#define SERV_PORT 8000
-
-int main(int argc, char *argv[])
-{
-    struct sockaddr_in servaddr;
-    char buf[MAXLINE];
-    int sockfd, n;
-
-    sockfd = Socket(AF_INET, SOCK_STREAM, 0);
-
-    bzero(&servaddr, sizeof(servaddr));
-    servaddr.sin_family = AF_INET;
-    inet_pton(AF_INET, "127.0.0.1", &servaddr.sin_addr);
-    servaddr.sin_port = htons(SERV_PORT);
-
-    Connect(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr));
-
-    while (fgets(buf, MAXLINE, stdin) != NULL) {
-        Write(sockfd, buf, strlen(buf));
-        n = Read(sockfd, buf, MAXLINE);
-        if (n == 0) {
-            printf("the other side has been closed.\n");
-            break;
-        }
-        else
-            Write(STDOUT_FILENO, buf, n);
-    }
-    Close(sockfd);
-
-    return 0;
-}
+struct eventpoll {
+　　...
+　　/*红黑树的根节点，这棵树中存储着所有添加到epoll中的事件，
+　　也就是这个epoll监控的事件*/
+　　struct rb_root rbr;
+　　/*双向链表rdllist保存着将要通过epoll_wait返回给用户的、满足条件的事件*/
+　　struct list_head rdllist;
+　　...
+};
 ```
 
-<div align = center><img src="../图片/UNIX42.png" width="700px" /></div>
+我们在调用epoll_create时，内核除了帮我们在epoll文件系统里建了个file结点， **<font color = red>在内核cache里建了个红黑树用于存储以后epoll_ctl传来的socket外，还会再建立一个rdllist双向链表，用于存储准备就绪的事件，</font>** 当epoll_wait调用时，仅仅观察这个rdllist双向链表里有没有数据即可。有数据就返回，没有数据就sleep，等到timeout时间到后即使链表没数据也返回。所以，epoll_wait非常高效。
 
-<div align = center><img src="../图片/UNIX43.png" width="700px" /></div>
+所有添加到epoll中的事件都会与设备(如网卡)驱动程序 **建立回调关系** ，也就是说相应事件的发生时会调用这里的回调方法。这个回调方法在内核中叫做 **ep_poll_callback** ，它会把这样的事件放到上面的rdllist双向链表中。
 
-## 二.epoll事件模型
+在epoll中对于每一个事件都会建立一个epitem结构体，如下所示：
+
+```c
+struct epitem {
+　　...
+　　//红黑树节点
+　　struct rb_node rbn;
+　　//双向链表节点
+　　struct list_head rdllink;
+　　//事件句柄等信息
+　　struct epoll_filefd ffd;
+　　//指向其所属的eventepoll对象
+　　struct eventpoll *ep;
+　　//期待的事件类型
+　　struct epoll_event event;
+　　...
+}; // 这里包含每一个事件对应着的信息。
+```
+
+当调用epoll_wait检查是否有发生事件的连接时，只是检查eventpoll对象中的 **rdllist双向链表是否有epitem元素** 而已， **如果rdllist链表不为空，则这里的事件复制到用户态内存（使用共享内存提高效率）中，同时将事件数量返回给用户。** 因此epoll_waitx效率非常高。
+
+**epoll_ctl在向epoll对象中添加、修改、删除事件时，从rbr红黑树中查找事件也非常快，** 也就是说epoll是非常高效的，它可以轻易地处理百万级别的并发连接。
+
+<div align = center><img src="../图片/UNIX45.png" width="500px" /></div>
+
+【总结】
+
+**一颗红黑树，一张准备就绪句柄链表，少量的内核cache，就帮我们解决了大并发下的socket处理问题。**
+
++ 执行`epoll_create()`时，创建了红黑树和就绪链表；
+
++ 执行`epoll_ctl()`时，如果增加socket句柄，则检查在红黑树中是否存在，存在立即返回，不存在则添加到树干上，然后向内核注册回调函数，用于当中断事件来临时向准备就绪链表中插入数据；
+
++ 执行`epoll_wait()`时立刻返回准备就绪链表里的数据即可。
+
+<div align = center><img src="../图片/UNIX46.png" width="600px" /></div>
+
+
+
+## 二.epoll两种触发模式
 
 ### 1.事件模型
 
@@ -317,6 +223,8 @@ int main(int argc, char *argv[])
 
 +  只有当read或者write返回EAGAIN(非阻塞读，暂时无数据) 时才需要挂起、等待。但这并不是说每次read时都需要循环读，直到读到产生一个EAGAIN才认为此次事件处理完成，当read返回的读到的数据长度小于请求的数据长度时，就可以确定此时缓冲中已没有数据了，也就可以认为此事读事件已处理完成。
 
+<div align = center><img src="../图片/UNIX48.png" width="800px" /></div>
+
 ### 3.LT模式
 
 与ET模式不同的是，以LT方式调用epoll接口的时候，它就相当于一个速度比较快的poll，无论后面的数据是否被使用。
@@ -325,7 +233,12 @@ LT(level triggered)：LT是缺省的工作方式，并且同时支持block和no-
 
 ET(edge-triggered)：ET是高速工作方式，只支持no-block socket。在这种模式下，当描述符从未就绪变为就绪时，内核通过epoll告诉你。然后它会假设你知道文件描述符已经就绪，并且不会再为那个文件描述符发送更多的就绪通知。 **请注意，如果一直不对这个fd作IO操作(从而导致它再次变成未就绪)，内核不会发送更多的通知(only once).**
 
+<div align = center><img src="../图片/UNIX47.png" width="800px" /></div>
 
+### 4.总结
+
+- LT 模式（水平触发，默认）**只要有数据都会触发**，缓冲区剩余未读尽的数据会导致epoll_wait返回。
+- ET模式（边缘触发）**只有数据到来才触发**，**不管缓存区中是否还有数据**，缓冲区剩余未读尽的数据不会导致epoll_wait返回； **这种模式比水平触发效率高，系统不会充斥大量你不关心的就绪文件描述符。**
 
 
 
@@ -652,4 +565,8 @@ int main(int argc, char *argv[])
 
 
 
+
+## 参考资料
+
++ [epoll原理详解及epoll反应堆模型](https://blog.csdn.net/daaikuaichuan/article/details/83862311)
 
