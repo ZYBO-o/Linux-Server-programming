@@ -27,9 +27,9 @@
 
 + [~~高级I/O~~](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/16%E9%AB%98%E7%BA%A7IO.md)
 
-+ [I/O复用—select与poll](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/17%20I:O%E5%A4%8D%E7%94%A8%E2%80%94select%E4%B8%8Epoll.md)
++ [~~I/O复用—select与poll~~](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/17%20I:O%E5%A4%8D%E7%94%A8%E2%80%94select%E4%B8%8Epoll.md)
 
-+ [I/O复用—epoll](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/18%20I:O%E5%A4%8D%E7%94%A8%E2%80%94epoll.md)
++ [~I/O复用—epoll~~](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/18%20I:O%E5%A4%8D%E7%94%A8%E2%80%94epoll.md)
 
 + [进程池与线程池](https://github.com/ZYBO-o/Linux-Server-programming/blob/main/Notes/19%E8%BF%9B%E7%A8%8B%E6%B1%A0%E4%B8%8E%E7%BA%BF%E7%A8%8B%E6%B1%A0.md)
 

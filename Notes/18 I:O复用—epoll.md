@@ -92,8 +92,6 @@ typedef union epoll_data {
   + fd ： 具体需要操作的文件描述符
   + event： 告诉内核需要监听的事件
 
-
-
 #### epoll_wait
 
 ```c
@@ -242,7 +240,27 @@ ET(edge-triggered)：ET是高速工作方式，只支持no-block socket。在这
 
 
 
-## 三.epoll反应堆模型
+## 三.三组I/O复用函数的比较
+
+:large_orange_diamond:  **支持一个进程所能打开的最大连接数**
+
+<div align = center><img src="../图片/UNIX54.png" width="700px" /></div>
+
+:large_orange_diamond: ​**FD剧增后带来的IO效率问题**
+
+<div align = center><img src="../图片/UNIX55.png" width="700px" /></div>
+
+:large_orange_diamond: **消息传递方式**
+
+<div align = center><img src="../图片/UNIX56.png" width="700px" /></div>
+
+:diamond_shape_with_a_dot_inside: **总体比较**
+
+<div align = center><img src="../图片/UNIX53.png" width="800px" /></div>
+
+
+
+## 四.epoll反应堆模型
 
 ### 1.epoll模型对比
 
