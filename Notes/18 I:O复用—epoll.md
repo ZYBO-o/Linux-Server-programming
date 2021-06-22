@@ -125,6 +125,30 @@ int epoll_pwait(int epfd, struct epoll_event *events,
     +  0： 立即返回，非阻塞
     + \>0： 指定毫秒
 
+:diamond_shape_with_a_dot_inside: **epoll_wait的优势：**
+
+epoll_wait函数如果检测到事件，就将所有就绪的事件从内核事件表（由epfd参数指定）中复制到它的第二个参数events指向的数组中。 **这个数组只用于输出epoll_wait检测到的就绪事件，而不像select和poll的数组参数那样既用于传入用户注册的事件，又用于输出内核检测到的就绪事件。** 这就极大地提高了应用程序索引就绪文件描述符的效率。
+
+```c
+//如何索引poll返回的就绪文件描述符
+int ret=poll(fds,MAX_EVENT_NUMBER,-1);
+//必须遍历所有已注册文件描述符并找到其中的就绪者（当然，可以利用ret来稍做优化）
+for(int i=0;i＜MAX_EVENT_NUMBER;++i){
+		if(fds[i].revents＆POLLIN)	{//判断第i个文件描述符是否就绪
+				int sockfd=fds[i].fd;
+				//处理sockfd
+		}
+}
+
+//如何索引epoll返回的就绪文件描述符
+int ret=epoll_wait(epollfd,events,MAX_EVENT_NUMBER,-1);
+//仅遍历就绪的ret个文件描述符
+for(int i=0;i＜ret;i++){
+		int sockfd=events[i].data.fd;
+		//sockfd肯定就绪，直接处理
+}
+```
+
 
 
 ### 3.epoll原理详解
@@ -238,9 +262,348 @@ ET(edge-triggered)：ET是高速工作方式，只支持no-block socket。在这
 - LT 模式（水平触发，默认）**只要有数据都会触发**，缓冲区剩余未读尽的数据会导致epoll_wait返回。
 - ET模式（边缘触发）**只有数据到来才触发**，**不管缓存区中是否还有数据**，缓冲区剩余未读尽的数据不会导致epoll_wait返回； **这种模式比水平触发效率高，系统不会充斥大量你不关心的就绪文件描述符。**
 
+### 5.代码实践
 
+:large_blue_diamond: **主函数编写**
 
-## 三.三组I/O复用函数的比较
+```c
+int main( int argc, char* argv[] )
+{
+    if( argc <= 2 ){
+        printf( "usage: %s ip_address port_number\n", basename( argv[0] ) );
+        return 1;
+    }
+    //ip
+    const char* ip = argv[1];
+    //端口
+    int port = atoi( argv[2] );
+
+    int ret = 0;
+    struct sockaddr_in address;
+    bzero( &address, sizeof( address ) );
+    address.sin_family = AF_INET;
+    inet_pton( AF_INET, ip, &address.sin_addr );
+    address.sin_port = htons( port );
+
+    int listenfd = socket( PF_INET, SOCK_STREAM, 0 );
+    assert( listenfd >= 0 );
+
+    //端口复用
+    int opt = 1;
+    setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));      
+
+    ret = bind( listenfd, ( struct sockaddr* )&address, sizeof( address ) );
+    assert( ret != -1 );
+
+    ret = listen( listenfd, 5 );
+    assert( ret != -1 );
+
+  	//创建事件集合
+    struct epoll_event events[ MAX_EVENT_NUMBER ];
+    //创建红黑树结点
+    int epollfd = epoll_create( 5 );
+    assert( epollfd != -1 );
+    //添加到红黑树中，设置为ET模式
+    addfd( epollfd, listenfd, true );
+
+    while( 1 )
+    {
+        int ret = epoll_wait( epollfd, events, MAX_EVENT_NUMBER, -1 );
+        if ( ret < 0 ){
+            printf( "epoll failure\n" );
+            break;
+        }
+   			//进行ET模式操作或者LT模式操作
+        //lt( events, ret, epollfd, listenfd );
+        et( events, ret, epollfd, listenfd );
+    }
+    close( listenfd );
+    return 0;
+}
+```
+
+:large_blue_diamond: **功能函数：**
+
+```c
+//文件描述符设置为非阻塞
+int setnonblocking( int fd ){
+    int old_option = fcntl( fd, F_GETFL );
+    int new_option = old_option | O_NONBLOCK;
+    fcntl( fd, F_SETFL, new_option );
+    return old_option;
+}
+
+//将事件设置为ET/LT，并注册到红黑树中
+void addfd( int epollfd, int fd, bool enable_et )
+{
+    struct epoll_event event;
+    event.data.fd = fd;
+    event.events = EPOLLIN;
+    if( enable_et )
+    {
+        event.events |= EPOLLET;
+    }
+    epoll_ctl( epollfd, EPOLL_CTL_ADD, fd, &event );
+    setnonblocking( fd );
+}
+```
+
+:diamond_shape_with_a_dot_inside: **ET模式操作：**
+
+```c
+void et( struct epoll_event* events, int number, int epollfd, int listenfd )
+{
+    char buf[ BUFFER_SIZE ];
+    for ( int i = 0; i < number; i++ )
+    {
+        int sockfd = events[i].data.fd;
+        //事件是否为新建连接事件
+        if ( sockfd == listenfd )
+        {
+            struct sockaddr_in client_address;
+            socklen_t client_addrlength = sizeof( client_address );
+            int connfd = accept( listenfd, ( struct sockaddr* )&client_address, &client_addrlength );
+            //新建的文件描述符进行注册为ET
+            addfd( epollfd, connfd, true );
+        }
+        //是否为读事件
+        else if ( events[i].events & EPOLLIN )
+        {
+            printf( "event trigger once\n" );
+            while( 1 )
+            {
+                memset( buf, '\0', BUFFER_SIZE );
+                int ret = recv( sockfd, buf, BUFFER_SIZE-1, 0 );
+                //如果读出的文字小于0
+                if( ret < 0 )
+                {
+                    if( ( errno == EAGAIN ) || ( errno == EWOULDBLOCK ) )
+                    {
+                        printf( "read later\n" );
+                        break;
+                    }
+                    close( sockfd );
+                    break;
+                }
+                else if( ret == 0 )
+                {
+                    close( sockfd );
+                }
+                else
+                {
+                    printf( "get %d bytes of content: %s\n", ret, buf );
+                }
+            }
+        }
+        else
+        {
+            printf( "something else happened \n" );
+        }
+    }
+}
+```
+
+:diamond_shape_with_a_dot_inside: L**T模式操作：**
+
+```c
+void lt( struct epoll_event* events, int number, int epollfd, int listenfd )
+{
+    char buf[ BUFFER_SIZE ];
+    for ( int i = 0; i < number; i++ )
+    {
+        int sockfd = events[i].data.fd;
+        if ( sockfd == listenfd )
+        {
+            struct sockaddr_in client_address;
+            socklen_t client_addrlength = sizeof( client_address );
+            int connfd = accept( listenfd, ( struct sockaddr* )&client_address, &client_addrlength );
+            addfd( epollfd, connfd, false );
+        }
+        else if ( events[i].events & EPOLLIN )
+        {
+            printf( "event trigger once\n" );
+            memset( buf, '\0', BUFFER_SIZE );
+            int ret = recv( sockfd, buf, BUFFER_SIZE-1, 0 );
+            if( ret <= 0 )
+            {
+                close( sockfd );
+                continue;
+            }
+            printf( "get %d bytes of content: %s\n", ret, buf );
+        }
+        else
+        {
+            printf( "something else happened \n" );
+        }
+    }
+}
+```
+
+:diamond_shape_with_a_dot_inside: **运行结果：**
+
+:diamonds: ET:
+
+<div align = center><img src="../图片/UNIX69.png" width="700px" /></div>
+
+:diamonds: LT:
+
+<div align = center><img src="../图片/UNIX70.png" width="700px" /></div>
+
+从运行结果可以看出，只要缓存区的数据没有读完，就会触发一次LT事件；使用ET，设置非阻塞轮询进行读写时，会实现客户端发送一次数据时才会触发ET事件，这样效率更高。
+
+## 三.EPOLLONESHOT事件
+
+### 1.使用方式
+
+即使使用ET模式，一个socket上的某个事件还是可能被触发多次。这在并发程序中就会引起一个问题：
+
+**比如一个线程（或进程，下同）在读取完某个socket上的数据后开始处理这些数据，而在数据的处理过程中该socket上又有新数据可读（EPOLLIN再次被触发），此时另外一个线程被唤醒来读取这些新的数据。于是就出现了两个线程同时操作一个socket的局面。**
+
+上述局面当然不是我们期望的。我们期望的是一个socket连接在任一时刻都只被一个线程处理。这一点可以使用epoll的EPOLLONESHOT事件实现。
+
+:small_orange_diamond: 对于注册了EPOLLONESHOT事件的文件描述符，操作系统最多触发其上注册的一个可读、可写或者异常事件，且只触发一次，除非我们使用epoll_ctl函数重置该文件描述符上注册的EPOLLONESHOT事件。
+
+:small_orange_diamond: 这样，当一个线程在处理某个socket时，其他线程是不可能有机会操作该socket的。但反过来思考，注册了EPOLLONESHOT事件的socket一旦被某个线程处理完毕，该线程就应该立即重置这个socket上的EPOLLONESHOT事件，以确保这个socket下一次可读时，其EPOLLIN事件能被触发，进而让其他工作线程有机会继续处理这个socket。
+
+### 2.代码实践
+
+:large_blue_diamond: **功能函数部分：**
+
+```c
+struct fds
+{
+   int epollfd;
+   int sockfd;
+};
+```
+
++ 设置结构体，作为线程功能函数的参数
+
+```c++
+//设置为非阻塞
+int setnonblocking( int fd )
+{
+    int old_option = fcntl( fd, F_GETFL );
+    int new_option = old_option | O_NONBLOCK;
+    fcntl( fd, F_SETFL, new_option );
+    return old_option;
+}
+
+void addfd( int epollfd, int fd, bool oneshot )
+{
+    struct epoll_event event;
+    event.data.fd = fd;
+    event.events = EPOLLIN | EPOLLET;
+  	//是否设置为EPOLLONESHOT
+    if( oneshot ){
+        event.events |= EPOLLONESHOT;
+    }
+  	//对文件描述符进行修改
+    epoll_ctl( epollfd, EPOLL_CTL_ADD, fd, &event );
+    setnonblocking( fd );
+}
+```
+
+:large_blue_diamond: **主函数：**
+
+```c
+//注册事件集合
+struct epoll_event events[ MAX_EVENT_NUMBER ];
+//创建红黑树根
+int epollfd = epoll_create( 5 );
+assert( epollfd != -1 );
+//listenfd没有注册EPOLLONESHOT
+addfd( epollfd, listenfd, false );
+
+while( 1 )
+{		//进行监听
+    int ret = epoll_wait( epollfd, events, MAX_EVENT_NUMBER, -1 );
+    if ( ret < 0 ){
+        printf( "epoll failure\n" );
+        break;
+    }
+
+    for ( int i = 0; i < ret; i++ ){
+      	//读取事件
+        int sockfd = events[i].data.fd;
+        //如果是连接事件
+        if ( sockfd == listenfd )
+        {
+            struct sockaddr_in client_address;
+            socklen_t client_addrlength = sizeof( client_address );
+          	//进行连接
+            int connfd = accept( listenfd, ( struct sockaddr* )&client_address, &client_addrlength );
+            //将新事件进行注册，并设置为EPOLLONESHOT
+            addfd( epollfd, connfd, true );
+        }
+        //如果是读事件
+        else if ( events[i].events & EPOLLIN )
+        {		//创建线程
+            pthread_t thread;
+          	//创建结构体，将文件描述符和红黑树根结点作为结构体元素
+            struct fds fds_for_new_worker;
+            fds_for_new_worker.epollfd = epollfd;
+            fds_for_new_worker.sockfd = sockfd;
+          	//创建线程，让线程进行操作
+            pthread_create( &thread, NULL, worker, ( void* )&fds_for_new_worker );
+        }
+        else
+        {
+            printf( "something else happened \n" );
+        }
+    }
+}
+```
+
+:diamond_shape_with_a_dot_inside: **线程功能函数：**
+
+```c
+void* worker( void* arg )
+{
+    //解析参数
+    int sockfd = ( (struct fds*)arg )->sockfd;
+    int epollfd = ( (struct fds*)arg )->epollfd;
+    printf( "start new thread to receive data on fd: %d\n", sockfd );
+    char buf[ BUFFER_SIZE ];
+    memset( buf, '\0', BUFFER_SIZE );
+    while( 1 ){		
+      	//从缓冲区读数据
+        int ret = recv( sockfd, buf, BUFFER_SIZE-1, 0 );
+      	//对方关闭套接字的情况才是0
+        if( ret == 0 ){
+            close( sockfd );
+            printf( "foreiner closed the connection\n" );
+            break;
+        }
+      	//如果读写错误
+        else if( ret < 0 ){
+          	//如果是这种情况，则认为线程处理完毕，
+            if( errno == EAGAIN ){
+              	//重新设置ONESHOT，确保下次可读时，EPOLLIN事件能被触发
+                reset_oneshot( epollfd, sockfd );
+                printf( "read later\n" );
+                break;
+            }
+        }
+      	//如果读到数据，则输出
+        else{
+            printf( "get content: %s,pthreadid = %d\n", buf,getpid());
+            sleep( 5 );
+        }
+    }
+    printf( "end thread receiving data on fd: %d\n", sockfd );
+}
+```
+
+:large_orange_diamond: 运行结果
+
+<div align = center><img src="../图片/UNIX71.png" width="700px" /></div>
+
+从工作线程函数worker来看，如果一个工作线程处理完某个socket上的一次请求（用休眠5 s来模拟这个过程）之后，又接收到该socket上新的客户请求，则该线程将继续为这个socket服务。并且因为该socket上注册了EPOLLONESHOT事件，其他线程没有机会接触这个socket.
+
+如果工作线程等待5s后仍然没收到该socket上的下一批客户数据，则它将放弃为该socket服务。同时，它调用reset_oneshot函数来重置该socket上的注册事件，这将使epoll有机会再次检测到该socket上的EPOLLIN事件，进而使得其他线程有机会为该socket服务。
+
+## 四.三组I/O复用函数的比较
 
 :large_orange_diamond:  **支持一个进程所能打开的最大连接数**
 
@@ -260,7 +623,7 @@ ET(edge-triggered)：ET是高速工作方式，只支持no-block socket。在这
 
 
 
-## 四.epoll反应堆模型
+## 五.epoll反应堆模型
 
 ### 1.epoll模型对比
 
