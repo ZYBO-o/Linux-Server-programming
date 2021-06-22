@@ -513,5 +513,8 @@ delete [] users;
 close( listenfd );
 ```
 
+:arrow_right:  **运行结果**
+
 <div align = center><img src="../图片/UNIX73.png" width="1000px" /></div>
 
+ :arrow_forward: [源码](https://github.com/ZYBO-o/Linux-Server-programming/tree/main/ProjectCodes/mytalkserver)
