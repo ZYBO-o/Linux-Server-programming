@@ -217,3 +217,301 @@ poll(fds, 5, -1);
 **缺点：**
 
 + 但还是需要将数组全部变量，找出已连接的文件描述符，而不是直接返回满足的文件描述符数组。
+
+### 3.poll实现聊天室程序
+
+:diamond_shape_with_a_dot_inside: 本节以poll为例实现一个简单的聊天室程序，以阐述如何使用I/O复用技术来同时处理网络连接和用户输入。
+
+该聊天室程序能让所有用户同时在线群聊，它分为客户端和服务器两个部分。其中客户端程序有两个功能：
+
++ 从标准输入终端读入用户数据，并将用户数据发送至服务器；
++ 往标准输出终端打印服务器发送给它的数据。服务器的功能是接收客户数据，并把客户数据发送给每一个登录到该服务器上的客户端（数据发送者除外）。
+
+#### 客户端
+
+:one:  **创建socket，绑定IP与端口，进行连接**
+
+```c++
+const char* ip = argv[1];
+int port = atoi( argv[2] );
+
+struct sockaddr_in server_address;
+bzero( &server_address, sizeof( server_address ) );
+server_address.sin_family = AF_INET;
+inet_pton( AF_INET, ip, &server_address.sin_addr );
+server_address.sin_port = htons( port );
+
+int sockfd = socket( PF_INET, SOCK_STREAM, 0 );
+assert( sockfd >= 0 );
+//进行连接
+if ( connect( sockfd, ( struct sockaddr* )&server_address, sizeof( server_address ) ) < 0 )
+{
+  	printf( "connection failed\n" );
+  	close( sockfd );
+ 	 return 1;
+}
+```
+
+:two: **注册poll**
+
+```c++
+pollfd fds[2];
+//注册标准输入标识符
+fds[0].fd = 0;
+fds[0].events = POLLIN;
+fds[0].revents = 0;
+//注册socket文件标识符
+fds[1].fd = sockfd;
+fds[1].events = POLLIN | POLLRDHUP;
+fds[1].revents = 0;
+```
+
+:three: **注册管道**
+
+```c++
+char read_buf[BUFFER_SIZE];
+int pipefd[2];
+int ret = pipe( pipefd );
+assert( ret != -1 );
+```
+
+:four: **处理逻辑**
+
+```c++
+while( 1 )
+{
+  	//调用poll系统调用
+    ret = poll( fds, 2, -1 );
+    if( ret < 0 ){
+        printf( "poll failure\n" );
+        break;
+    }
+
+  	//如果是 POLLRDHUP 事件。说明server已经关闭链接
+    if( fds[1].revents & POLLRDHUP ){
+        printf( "server close the connection\n" );
+        break;
+    }
+  	//如果是 socket的读事件，则将消息从缓冲区取出并输出至终端
+    else if( fds[1].revents & POLLIN ){
+        memset( read_buf, '\0', BUFFER_SIZE );
+        recv( fds[1].fd, read_buf, BUFFER_SIZE-1, 0 );
+        printf( "%s\n", read_buf );
+    }
+  	//如果是标准输入的读事件——输入消息至终端，则利用splice函数，零拷贝得将消息通过管道传输至socket中
+    /*splice函数，高效的零拷贝*/
+    if( fds[0].revents & POLLIN )
+    {   //将 标准输入的数据 定向到到管道 中
+        ret = splice( 0, NULL, pipefd[1], NULL, 32768, SPLICE_F_MORE | SPLICE_F_MOVE );
+        //将管道中的数据 定向到 socket 中，等待server端进行读取
+        ret = splice( pipefd[0], NULL, sockfd, NULL, 32768, SPLICE_F_MORE | SPLICE_F_MOVE );
+    }
+}
+```
+
+#### 服务器端
+
+:one: **创建用户的数据结构：**
+
+```c
+//客户数据
+struct client_data
+{
+    sockaddr_in address;            //客户端socket地址
+    char* write_buf;                //待写到客户端的数据的位置
+    char buf[ BUFFER_SIZE ];        //从客户端读入的数据
+};
+```
+
+:two:  **创建socket，绑定IP与端口，设置监听数目**
+
+```c++
+const char* ip = argv[1];
+int port = atoi( argv[2] );
+
+int ret = 0;
+struct sockaddr_in address;
+bzero( &address, sizeof( address ) );
+address.sin_family = AF_INET;
+inet_pton( AF_INET, ip, &address.sin_addr );
+address.sin_port = htons( port );
+
+int listenfd = socket( PF_INET, SOCK_STREAM, 0 );
+assert( listenfd >= 0 );
+
+ret = bind( listenfd, ( struct sockaddr* )&address, sizeof( address ) );
+assert( ret != -1 );
+
+ret = listen( listenfd, 5 );
+assert( ret != -1 );
+```
+
+:three: **创建用户数组，初始化poll数组，注册listenfd事件**
+
+```c++
+//创建 FD_LIMIT 个用户元素？
+client_data* users = new client_data[FD_LIMIT];
+//创建 USER_LIMIT + 1 个poll事件数组
+pollfd fds[USER_LIMIT + 1];
+//连接数目
+int user_counter = 0;
+//先初始化为-1
+for( int i = 1; i <= USER_LIMIT; ++i ){
+  fds[i].fd = -1;
+  fds[i].events = 0;
+}
+//数组第一个注册的是 listened 文件描述符
+fds[0].fd = listenfd;
+fds[0].events = POLLIN | POLLERR;
+fds[0].revents = 0;
+```
+
+:four: **while循环，进行poll系统调用**
+
+```c++
+while( 1 ){   
+  	//进行系统调用
+    ret = poll( fds, user_counter + 1, -1 );
+    if ( ret < 0 ){
+        printf( "poll failure\n" );
+        break;
+    }
+  ...
+}
+```
+
+:five:  **循环遍历返回的事件数组，如果监听到的是连接事件**
+
+```c++
+//遍历结束后返回的 事件数组
+for( int i = 0; i < user_counter + 1; ++i ){
+    //如果是 listenfd 描述符 并且是 读事件
+    if( ( fds[i].fd == listenfd ) && ( fds[i].revents & POLLIN ) ) {
+      ...
+      //进行连接
+      int connfd = accept( listenfd,...);
+     
+      //如果用户数超过极限，则报错，关闭当前的 socket
+      if( user_counter >= USER_LIMIT ){
+        ...
+        close( connfd );
+        continue;
+      }
+      //用户数目 + 1
+      user_counter++;
+      //文件描述符对应的用户数组进行填写信息： 客户端socket地址
+      users[connfd].address = client_address;
+      //设置为非阻塞
+      setnonblocking( connfd );
+      //注册新用户对应的 poll 事件
+      fds[user_counter].fd = connfd;
+      fds[user_counter].events = POLLIN | POLLRDHUP | POLLERR;
+      fds[user_counter].revents = 0;
+      printf( "comes a new user, now have %d users\n", user_counter );
+    }
+```
+
+:six:  **如果监听到的是 错误事件**
+
+```c++
+else if( fds[i].revents & POLLERR )
+{
+    //输入错误信息
+    printf( "get an error from %d\n", fds[i].fd );
+    char errors[ 100 ];
+    memset( errors, '\0', 100 );
+    socklen_t length = sizeof( errors );
+    if( getsockopt( fds[i].fd, SOL_SOCKET, SO_ERROR, &errors, &length ) < 0 ){
+      	printf( "get socket option failed\n" );
+    }
+    continue;
+}
+```
+
+:seven: **如果监听到的是对方关闭链接的事件** :arrow_backward: ==注意==​
+
+```c++
+else if( fds[i].revents & POLLRDHUP )
+{   
+    //将最后一个 用户信息 赋给 关闭链接 的用户信息
+    users[fds[i].fd] = users[fds[user_counter].fd];
+    //关闭 原来对应的 socket 
+    close( fds[i].fd );
+    //传递新的 socket
+    fds[i] = fds[user_counter];
+    //循环退回一步，这样用来重新检查
+    i--;
+    //用户数目 - 1
+    user_counter--;
+    //输出退出信息
+    printf( "a client left\n" );
+}
+```
+
+:eight: **如果监听的是读事件**
+
+```c++
+else if( fds[i].revents & POLLIN )
+{   //定义一个 socket 接受 读事件的socket
+    int connfd = fds[i].fd;
+    memset( users[connfd].buf, '\0', BUFFER_SIZE );
+    //将文件描述符中的数据 读到 用户客户端数据处
+    ret = recv( connfd, users[connfd].buf, BUFFER_SIZE-1, 0 );
+    printf( "get %d bytes of client data %s from %d\n", ret, users[connfd].buf, connfd );
+    //缓冲区数据被完全接收
+    if( ret < 0 ){
+        if( errno != EAGAIN )
+        {
+            close( connfd );
+            //删除当前的用户
+            users[fds[i].fd] = users[fds[user_counter].fd];
+            fds[i] = fds[user_counter];
+            i--;
+            user_counter--;
+        }
+    }
+    else if( ret == 0 )
+      	printf( "code should not come to here\n" );
+    else{
+        //将数据发送给通知其他socket
+        for( int j = 1; j <= user_counter; ++j )
+        {
+            if( fds[j].fd == connfd )
+                continue;
+
+            fds[j].events |= ~POLLIN;
+            fds[j].events |= POLLOUT;
+            //其他用户需要写的数据
+            users[fds[j].fd].write_buf = users[connfd].buf;
+        }
+    }
+ }
+```
+
+:nine:  **如果是写事件**
+
+```c++
+else if( fds[i].revents & POLLOUT )
+{
+    int connfd = fds[i].fd;
+    //如果缓冲区为空，则继续
+    if( ! users[connfd].write_buf ) 
+      	continue;
+    //将数据发送给对应的用户
+    ret = send(...);
+    //重新调整用户信息
+    users[connfd].write_buf = NULL;
+    fds[i].events |= ~POLLOUT;
+    fds[i].events |= POLLIN;
+}
+```
+
+:keycap_ten: **清楚内存，关闭socket**
+
+```c++
+delete [] users;
+close( listenfd );
+```
+
+<div align = center><img src="../图片/UNIX73.png" width="1000px" /></div>
+
