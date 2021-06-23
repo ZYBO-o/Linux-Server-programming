@@ -213,11 +213,97 @@ while(1) {
 
 ### 2.select流程
 
+```c++
+
+char buf[BUFSIZE];
+int client[FD_SETSIZE];
+fd_set allset, rset;
+int nready;
+int i;
+
+int main() {
+
+	maxfd = listenfd;
+	maxi = -1;
+
+	for (int i = 0; i < FD_SETSIZE; ++i){
+		client[i] = -1;
+	}
+	FD_ZERO(&allset);
+	FD_SET(listenfd, &allset);
+
+	for(; ;) {
+		rset = allset;
+		//系统调用select
+		nready = select(maxfd + 1,&rset,NULL,NULL,NULL);
+		if(nready < 0) 
+			perror("select error");
+
+		//如果是连接请求
+		if(FD_ISSET(listenfd, &rset)) {
+			connfd = Accept(listenfd, (struct sockaddr *)&clie_addr, &clie_addr_len);
+			
+			//找到client中的空位,导入connfd
+			for (i = 0; i < FD_SETSIZE; ++i) {
+				if(client[i] < 0) {
+					client[i] = connfd;
+					breakl
+				}
+			}
+			//检查是否到达上限
+			if (i == FD_SETSIZE){
+				fputs("too many clients\n", stderr);
+                exit(1)
+			}
+			//将connfd添加到allset中，下一轮进行监听
+			FD_SET(connfd, &allset);
+
+			//更新参数
+			if(maxfd < connfd) maxfd = connfd;
+			if(i > maxi) maxi = i;
+			if(nready --) continue;
+		}
+
+		//检查哪个client中的文件操作符就绪
+		for (i = 0; i < maxi; ++i)
+		{
+			//找到就绪事件
+			if((sockfd = client[i]) < 0)
+				continue;
+			if(FD_ISSET(sockfd, &rset)) {
+				if(n = Read(sockfd, buf, sizeof(buf)) == 0) {
+					//关闭socket，并从集合中解除
+					Close(sockfd);
+					FD_CLR(sockfd, &allset);
+					client[i] = -1;
+				} else if(n > 0) {
+					for (j = 0; j < n; j++)
+                        buf[j] = toupper(buf[j]);
+                    Write(sockfd, buf, n);
+                    Write(STDOUT_FILENO, buf, n);
+				}
+				//就绪事件全部变量完成，则跳出循环
+				if(--nready == 0) {
+					break;
+				}
+			}
+		}
+	}
+	Close(listenfd);
+	return 0;
+
+}
+```
+
+
+
 <div align = center><img src="../图片/select.png"  width="900px" /></div>
 
 
 
 ## 四 .poll
+
+### 1.poll调用方法
 
 poll 也是操作系统提供的系统调用函数。
 
@@ -233,9 +319,116 @@ struct pollfd {
 
 它和 select 的主要区别就是，去掉了 select 只能监听 1024 个文件描述符的限制。
 
+### 2.poll流程
 
+```c++
+#define OPEN_MAX 6544
+#define MAXLINE 80
+
+int i,maxi, nready;
+char buf[MAXLINE];
+
+int main()
+{
+	//定义poll事件数组
+	struct pollfd client[OPEN_MAX];
+	client[0].fd = listenfd;
+	client[0].event = POLLIN;
+
+	//初始化剩余事件数组
+	for (i = 1; i < count; ++i){
+		client[i].fd = -1;
+	}
+	//client[]数组有效元素中最大元素下标
+	maxi = 0;
+  
+	for(; ;) {
+
+		nready = poll(client, maxi + 1, -1);
+
+		//判断连接是否就绪
+		if(client[0].revents & POLLIN) {
+			connfd = Accept(listenfd, (struct sockaddr *)&cliaddr, &clilen);
+
+			//将connfd导入client数组中
+			for(i = 1; i < OPEN_MAX; ++i) {
+				if(client[i] < 0) {
+					client[i] = connfd;
+					break;
+				}
+			}
+
+			//检查是否到达上限
+			if(i == OPEN_MAX)
+				perr_exit("too many clients");
+
+			//设置刚刚返回的connfd
+			client[i].event = POLLIN;
+
+			//更新参数
+			if(maxi < i) maxi = i;
+			if(--nready <= 0) continue;
+		}
+		//前面的if没满足,说明没有listenfd满足. 检测client[] 看是哪个connfd就绪
+		for(i = 1; i <= maxi; ++i) {
+			if((sockfd = client[i]) < 0)
+				continue;
+
+			if(client[i].revents & POLLIN) {
+
+				if((n = Read(sockfd, buf, MAXLINE)) < 0) {
+					 //poll中不监控该文件描述符,直接置为-1即可,不用像select中那样移除 */
+					if (errno == ECONNRESET) {  /* 收到RST标志 */
+                        Close(sockfd);
+                        client[i].fd = -1;     
+                    } else
+                        perr_exit("read error");
+				} else if(n == 0) {
+					Close(sockfd);
+					client[i].fd = -1;
+				} else {
+					for (j = 0; j < n; j++)
+                        buf[j] = toupper(buf[j]);
+                    Writen(sockfd, buf, n);
+				}
+
+				if(-- nready <= 0)
+					break;
+			}
+		}  
+	}	
+	Close(listenfd)
+	return 0;
+}
+```
+
+
+
+<div align = center><img src="../图片/poll.png"  width="900px" /></div>
+
+---
+
+### 3.poll与select的对比
+
+:diamond_shape_with_a_dot_inside: **优势：**
+
+:one: 没有了只能监听 1024 个文件描述符的限制。
+
+:two: 提供了pollfd 结构体，不需要自己设置fd数组 和 文件描述符事件集合(读，写，异常都要自己设置，poll直接在pollfd的event中设置)，在一定程度上有了简化。
+
+:disappointed_relieved: **一样的缺陷：**
+
+:one: 都是要传入数组，这就涉及到了资源拷贝，效率不高
+
+:two: 在内核层仍然是通过遍历的方式检查文件描述符的就绪状态，是个同步过程，只不过无系统调用切换上下文的开销。
+
+:three: 对于所传出的结构体数组，还是需要通过遍历maxi(往往设置为最大文件描述符 + 1)次来筛查哪些文件描述符满足就绪事件。
+
+---
 
 ## 五 .epoll
+
+### 1.调用流程
 
 epoll 是最终的大 boss，它解决了 select 和 poll 的一些问题。
 
@@ -271,6 +464,12 @@ int epoll_wait(
 使用起来，其内部原理就像如下一般丝滑。
 
 <img src="../图片/UNIX68.mp4" width="600px" />
+
+### 2.epoll流程
+
+<div align = center><img src="../图片/epoll.png"  width="900px" /></div>
+
+
 
 ---
 
