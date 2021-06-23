@@ -467,6 +467,81 @@ int epoll_wait(
 
 ### 2.epoll流程
 
+```c++
+#define MAXLINE 8192
+#define OPEN_MAX 5000
+
+int main() {
+	ssize_t nready, efd, res;
+	int listenfd, connfd, sockfd, n;
+	char buf[MAXLINE];
+
+	//创建红黑树根
+	efd = epoll_create(OPEN_MAX);
+	if (efd == -1)
+        perr_exit("epoll_create error");
+
+
+    struct epoll_event tep, ep[OPEN_MAX];
+    //将listenfd注册至红黑树中
+    tep.events = EPOLLIN;
+    tep.data.fd = listenfd;
+    res = epoll_ctl(efd, EPOLL_CTL_ADD, listenfd, &tep);
+
+    for(; ;) {
+    	//epoll调用
+    	nready = epoll_wait(efd, ep, OPEN_MAX, -1);
+    	if(nready < 0) 
+    		perr_exit("epoll_wait error");
+
+    	//遍历内核传出的事件数组
+    	for(int i = 0; i < nready; ++i) {
+    		//如果是连接事件
+    		if(ep[i].data.fd == listenfd) {
+    			connfd = Accept(listenfd, (struct sockaddr *)&cliaddr, &clilen);  
+    			//将新的socket加入红黑树
+    			tep.data.fd = connfd;
+    			tep.events = EPOLLIN;
+    			res = epoll_ctl(efd, EPOLL_CTL_ADD, connfd, &tep);
+    			if (res == -1)
+                    perr_exit("epoll_ctl error");
+    		}
+    		//否则就是读事件
+    		else{
+    			sockfd = ep[i].data.fd;
+    			//读取数据
+    			n = Read(sockfd, buf, MAXLINE);
+    			//如果对方关闭链接
+    			if(n == 0) {
+    				//将对应的socket从红黑树中删除
+    				res = epoll_ctl(efd, EPOLL_CTL_DEL, sockfd, NULL);
+    				Close(sockfd);
+    			}
+    			//如果出错
+    			else if(n < 0) {
+    				//将对应的socket从红黑树中删除
+    				res = epoll_ctl(efd, EPOLL_CTL_DEL, sockfd, NULL);
+    				Close(sockfd);
+    			}
+    			//进行逻辑操作
+    			else {
+    				for (i = 0; i < n; i++)
+                        buf[i] = toupper(buf[i]);   //转大写,写回给客户端
+
+                    Write(STDOUT_FILENO, buf, n);
+                    Writen(sockfd, buf, n);
+    			}
+    		}
+    	}
+    }
+close(listenfd);
+close(efd);
+	return 0;
+}
+```
+
+
+
 <div align = center><img src="../图片/epoll.png"  width="900px" /></div>
 
 
